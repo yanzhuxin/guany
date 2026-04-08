@@ -496,7 +496,7 @@ if __name__ == "__main__":
     # 推送至企业微信机器人
     WECHAT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=0d04ba7b-40e4-4502-bcce-bcbc60a2bfd4"
     WECHAT_WEBHOOK_TEST = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=36887f02-3fcf-46ac-a13f-69ddf0ddb595"
-    USE_TEST_WEBHOOK = False  # 使用正式webhook
+    USE_TEST_WEBHOOK = False  # 使用测试webhook
     if USE_TEST_WEBHOOK:
         print("ℹ️  使用测试webhook推送")
         send_to_wechat_webhook(WECHAT_WEBHOOK_TEST, report, OUTPUT_REPORT_PATH)

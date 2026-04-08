@@ -49,7 +49,7 @@ CONFIG = {
           "enable_push": True,  # 开启企业微信推送
           "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=0d04ba7b-40e4-4502-bcce-bcbc60a2bfd4",
           "test_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=36887f02-3fcf-46ac-a13f-69ddf0ddb595",
-          "use_test": False,  # 使用正式webhook
+           "use_test": True,  # 使用测试webhook
       },
 }
 

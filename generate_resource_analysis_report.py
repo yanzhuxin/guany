@@ -171,7 +171,7 @@ if __name__ == "__main__":
     ENABLE_WECHAT_PUSH = True
     WECHAT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=0d04ba7b-40e4-4502-bcce-bcbc60a2bfd4"
     WECHAT_WEBHOOK_TEST = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=36887f02-3fcf-46ac-a13f-69ddf0ddb595"
-    USE_TEST_WEBHOOK = False  # 切换到正式webhook
+    USE_TEST_WEBHOOK = False  # 使用测试webhook
 
     # ========== 1. 数据获取阶段 ==========
     print("===== 开始数据获取 =====")

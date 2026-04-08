@@ -10,8 +10,6 @@
     # 方式1: 传参调用
     result = GuanDataFetcher.fetch_data(
         token="your_token",
-        user_id="your_user_id",
-        x_dom_id="your_x_dom_id",
         ds_id="your_ds_id",
         filter_condition=FilterCondition().eq("合并月份", "2026-03"),
         limit=50000
@@ -20,8 +18,6 @@
     # 方式2: 使用环境变量默认值
     import os
     os.environ["GUANDATA_TOKEN"] = "your_token"
-    os.environ["GUANDATA_USER_ID"] = "your_user_id"
-    os.environ["GUANDATA_X_DOM_ID"] = "your_x_dom_id"
     os.environ["GUANDATA_DS_ID"] = "your_ds_id"
     
     result = GuanDataFetcher.fetch_data(
@@ -32,8 +28,8 @@
 import json
 import os
 import ssl
-import urllib2
-import urllib
+import urllib.request
+import urllib.error
 import base64
 import requests
 
@@ -45,8 +41,6 @@ SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 # 默认配置（从环境变量读取，也可直接修改）
 DEFAULT_CONFIG = {
     "token": os.getenv("GUANDATA_TOKEN", ""),
-    "user_id": os.getenv("GUANDATA_USER_ID", ""),
-    "x_dom_id": os.getenv("GUANDATA_X_DOM_ID", ""),
     "ds_id": os.getenv("GUANDATA_DS_ID", ""),
     "base_url": os.getenv("GUANDATA_BASE_URL", "https://d.qiniu.io")
 }
@@ -185,8 +179,6 @@ class GuanDataFetcher:
         
         Args:
             token: 认证token（默认从环境变量GUANDATA_TOKEN读取）
-            user_id: 用户ID（默认从环境变量GUANDATA_USER_ID读取）
-            x_dom_id: DOM ID（默认从环境变量GUANDATA_X_DOM_ID读取）
             ds_id: 数据集ID（默认从环境变量GUANDATA_DS_ID读取）
             base_url: API基础地址（默认https://d.qiniu.io）
             filter_condition: 筛选条件对象
@@ -214,17 +206,17 @@ class GuanDataFetcher:
         }
         
         # 发送请求
-        req = urllib2.Request(
+        req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode('utf-8'),
-            headers=headers
+            headers=headers,
+            method='POST'
         )
-        req.get_method = lambda: 'POST'
         
         try:
-            response = urllib2.urlopen(req, timeout=30, context=SSL_CONTEXT)
-            return json.loads(response.read().decode('utf-8'))
-        except urllib2.HTTPError as e:
+            with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
             return {"error": "HTTPError", "code": e.code, "message": str(e)}
         except Exception as e:
             return {"error": "Exception", "message": str(e)}
@@ -242,8 +234,6 @@ class GuanDataFetcher:
         
         Args:
             token: 认证token（默认从环境变量GUANDATA_TOKEN读取）
-            user_id: 用户ID（默认从环境变量GUANDATA_USER_ID读取）
-            x_dom_id: DOM ID（默认从环境变量GUANDATA_X_DOM_ID读取）
             ds_id: 数据集ID（默认从环境变量GUANDATA_DS_ID读取）
             base_url: API基础地址（默认https://d.qiniu.io）
             filter_condition: 筛选条件对象
@@ -301,12 +291,10 @@ class GuanDataFetcher:
 # ==================== 使用示例 ====================
 
 if __name__ == "__main__":
-    # 示例配置（可通过环境变量设置，或直接传参）
-    EXAMPLE_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxLXRoV0FJRS9oKzZBUE1KeGNLTzhLaWdnd0VMOE9CRkdaanVBMGROMmJma0V1a3pVL0ZEZVc2N2tMdGtqUjQ5SFk4ajZWb3lWWVl2S2p3aFluQUpkWGpKRUtBQzM5Vkptdkd5YWFnalE3b3JlQVhhdUZrbkR1T090WUtnPT0iLCJhdXRvTG9nb3V0T25DbG9zZUVuYWJsZWQiOmZhbHNlLCJpc3MiOiJndWFuZGF0YS5jb20iLCJleHAiOjE3NzQyMjc5MDMsImlhdCI6MTc3MzM2Njc0MiwiaW5pdFRpbWUiOiIyMDI2LTAzLTA5IDA5OjA1OjAzLjc1MiIsImp0aSI6IjYxMzUwMTY3MTRlYzkxOTQ5NzQzNWQwYWUzZmJmMzM3M2EzNGM2MWRmYmYwN2NiNjljNTJlNzc2MjY4ZGM4NjcyMDUxZTY4OWFmNmE5ZDE0MWExYjQxNDE0NTcyMGQ5MzYxMzM0NjY5ZWNjYmZhNGRhNDc0NjNhODkyNWJkY2YxNWJiYWIyN2NmMmFkMjUyYjJhNDIwM2YyN2ExZGQwZTdiN2JkNWZhZDUwZDIzZGYzYjMyODg4MWZlYjIyZTVlMTc4NDM1NzRhNTcyY2Y1MDk5MDYwZTE1YTdkZjUxYTEwYWM5ZDIxMjFmZDA5NzllODVlODdhNTFlZjJkNzhhNWQifQ.4FqTX0ZA5BWG4ui2_o2p5Q6upiFIPqV5gd9nq4rfCHM"
-    EXAMPLE_USER_ID = "eWFuemh1eGlu"
-    EXAMPLE_X_DOM_ID = "Z3VhbmJp"
+    # 示例配置，自动获取token
     EXAMPLE_DS_ID = "eff95e2a2fe0048dfb9727b1"
     
+    EXAMPLE_TOKEN  = get_token()
     print("=" * 80)
     print("观远数据客户端 - 使用示例")
     print("=" * 80)
