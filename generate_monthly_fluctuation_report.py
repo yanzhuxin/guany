@@ -133,18 +133,18 @@ def calculate_customer_dimension(df, latest_day, prev_day, month):
 
 def calculate_business_dimension(df, latest_day, prev_day, month):
     """对波动大的月份下钻到业务方维度"""
-    # 筛选指定月份，分别汇总两天业务类型数据
-    latest_agg = df[(df["统计日期"] == latest_day) & (df["月份"] == month)].groupby(["业务类型"])[
+    # 筛选指定月份，分别汇总两天业务方数据
+    latest_agg = df[(df["统计日期"] == latest_day) & (df["月份"] == month)].groupby(["业务方"])[
         ["计费金额", "成本金额", "毛利_new", "计费带宽G"]
     ].sum().reset_index()
 
-    prev_agg = df[(df["统计日期"] == prev_day) & (df["月份"] == month)].groupby(["业务类型"])[
+    prev_agg = df[(df["统计日期"] == prev_day) & (df["月份"] == month)].groupby(["业务方"])[
         ["计费金额", "成本金额", "毛利_new", "计费带宽G"]
     ].sum().reset_index()
 
     # 合并数据
     merged = pd.merge(
-        prev_agg, latest_agg, on=["业务类型"], how="outer", suffixes=("_prev", "_latest")
+        prev_agg, latest_agg, on=["业务方"], how="outer", suffixes=("_prev", "_latest")
     ).fillna(0)
 
     # 计算变化
@@ -169,70 +169,72 @@ def generate_markdown_report(df, monthly_result, latest_day, prev_day, output_pa
 ========================================================================================
 指标       昨日汇总            今日汇总            变化金额             变化率
 ========================================================================================
-""".format(datetime_now=datetime_now, prev_day=prev_day, latest_day=latest_day)
+ """.format(datetime_now=datetime_now, prev_day=prev_day, latest_day=latest_day)
 
-    report_content += """
-========================================================================================
-- 各月份前后两天指标对比
-========================================================================================
-月份    指标           昨日汇总            今日汇总            变化金额             变化率
-========================================================================================
-"""
-    # 输出每个月份的明细
-    for _, row in monthly_result.iterrows():
-        month = row["月份"]
-        # 成本金额
-        report_content += "%s  成本金额   %-12.2f万元  %-15.2f万元  %+11.2f万元  %+7.2f%%\n" % (
-            month, row["成本金额_prev"] / 10000, row["成本金额_latest"] / 10000, 
-            (row["成本金额_latest"] - row["成本金额_prev"]) / 10000,
-            (row["成本金额_latest"] - row["成本金额_prev"]) / row["成本金额_prev"] * 100 if row["成本金额_prev"] != 0 else 0
-        )
-        # 最终计费金额
-        report_content += "%s  最终计费金额   %-12.2f万元  %-15.2f万元  %+11.2f万元  %+7.2f%%\n" % (
-            month, row["计费金额_prev"] / 10000, row["计费金额_latest"] / 10000, 
-            (row["计费金额_latest"] - row["计费金额_prev"]) / 10000,
-            (row["计费金额_latest"] - row["计费金额_prev"]) / row["计费金额_prev"] * 100 if row["计费金额_prev"] != 0 else 0
-        )
-        # 毛利
-        report_content += "%s  毛利       %-12.2f万元  %-15.2f万元  %+11.2f万元  %+7.2f%%\n" % (
-            month, row["毛利_new_prev"] / 10000, row["毛利_new_latest"] / 10000, 
-            row["毛利_diff"] / 10000, row["毛利_rate"]
-        )
-        # 计费带宽
-        report_content += "%s  计费带宽   %-12.2fG    %-15.2fG    %+11.2fG    -\n" % (
-            month, row["计费带宽G_prev"], row["计费带宽G_latest"], 
-            row["计费带宽_diff"]
-        )
-        report_content += "----------------------------------------------------------------------------------------\n"
+    # 只筛选毛利变化超过3万的大波动月份输出明细
+    big_diff_months = monthly_result[abs(monthly_result["毛利_diff"]) > 30000].copy()
+    
+    if len(big_diff_months) > 0:
+        report_content += """
+ =======================================================================================
+ - 波动月份前后两日指标对比（仅展示毛利波动 > 3万的月份）
+ =======================================================================================
+ 月份    指标           昨日汇总            今日汇总            变化金额             变化率
+ =======================================================================================
+ """
+        # 输出波动月份明细 - 只展示毛利
+        for _, row in big_diff_months.iterrows():
+            month = row["月份"]
+            # 只展示毛利
+            report_content += "%s  毛利       %-12.2f万元  %-15.2f万元  %+11.2f万元  %+7.2f%%\n" % (
+                month, row["毛利_new_prev"] / 10000, row["毛利_new_latest"] / 10000, 
+                row["毛利_diff"] / 10000, row["毛利_rate"]
+            )
+            report_content += "----------------------------------------------------------------------------------------\n"
+    else:
+        report_content += """
+ =======================================================================================
+ - 无波动超过3万的月份
+ =======================================================================================
+ """
 
-    # 筛选毛利变化超过10万的大波动月份
-    big_diff_months = monthly_result[abs(monthly_result["毛利_diff"]) > 100000].copy()
+    # 对每个大波动月份，下钻业务方维度
     for _, month_row in big_diff_months.iterrows():
-            month = month_row["月份"]
-            diff = month_row["毛利_diff"]
-            customer_result = calculate_customer_dimension(df, latest_day, prev_day, month)
-            if len(customer_result) > 0:
-                report_content += "\n### {} 月份（毛利变化 {:.2f}万元）\n\n".format(month, diff / 10000)
-                report_content += "%-20s %-12s %-12s %+10s %+8s\n" % (
-                    "客户名称", "昨日毛利(万元)", "今日毛利(万元)", "毛利变化", "变化率"
-                )
-            for _, cust_row in customer_result.iterrows():
-                cname = cust_row["客户_new"]
-                if pd.isna(cname) or str(cname).strip() == "":
+        month = month_row["月份"]
+        diff = month_row["毛利_diff"]
+        
+        # 业务方维度下钻
+        business_result = calculate_business_dimension(df, latest_day, prev_day, month)
+        if len(business_result) > 0:
+            report_content += "\n### {} 月份（毛利变化 {:.2f}万元）\n\n".format(month, diff / 10000)
+            report_content += "%-18s %-10s %-10s %-10s %-10s %+10s %+8s\n" % (
+                "业务方", "昨日成本", "今日成本", "昨日计费", "今日计费", "毛利变化", "变化率"
+            )
+            for _, bus_row in business_result.iterrows():
+                bname = bus_row["业务方"]
+                if pd.isna(bname) or str(bname).strip() == "":
                     continue
-                p_prev = cust_row["毛利_new_prev"] / 10000
-                p_latest = cust_row["毛利_new_latest"] / 10000
-                p_diff = cust_row["毛利_diff"] / 10000
+                c_prev = bus_row["成本金额_prev"] / 10000
+                c_latest = bus_row["成本金额_latest"] / 10000
+                f_prev = bus_row["计费金额_prev"] / 10000
+                f_latest = bus_row["计费金额_latest"] / 10000
+                p_prev = bus_row["毛利_new_prev"] / 10000
+                p_latest = bus_row["毛利_new_latest"] / 10000
+                p_diff = bus_row["毛利_diff"] / 10000
                 p_rate = (p_diff / p_prev * 100) if p_prev !=0 else np.inf
-                report_content += "%-18s %-11.2f万元 %-11.2f万元 %+9.2f万元 %+7.2f%%\n" % (
-                    cname, p_prev, p_latest, p_diff, p_rate
-                )
+                report_content += "%-16s %-8.2f万元 %-8.2f万元 %-8.2f万元 %-8.2f万元 %+8.2f万元 %+7.2f%%\n" % (
+                    bname, c_prev, c_latest, f_prev, f_latest, p_diff, p_rate
+                 )
 
-    # 核心结论只展示大波动月份
+    # 核心结论列出所有波动月份
     extra_line = ""
     if len(big_diff_months) > 0:
-        top_month = big_diff_months.iloc[0]
-        extra_line = "## 核心结论\n1. 最大波动月份：**%s**，毛利变化%.2f万元\n2. 共识别到%s个波动超过10万元的月份" % (top_month['月份'], top_month['毛利_diff'] / 10000, len(big_diff_months))
+        extra_line = "## 核心结论\n"
+        extra_line += "1. 共识别到 **%d** 个毛利波动超过3万元的月份:\n" % len(big_diff_months)
+        extra_line += "2. 波动月份列表:\n"
+        for idx, row in big_diff_months.iterrows():
+            sign = "+" if row["毛利_diff"] > 0 else ""
+            extra_line += "   - **%s**: %s%.2f万元\n" % (row["月份"], sign, row["毛利_diff"] / 10000)
     
     report_content += """
 ---
@@ -252,26 +254,29 @@ def send_to_wechat_webhook(webhook_url, markdown_content, report_path):
     import requests
     headers = {"Content-Type": "application/json"}
     try:
-        # 提取需要的内容，去掉空的整体汇总部分
+        # 提取需要的内容，保留从头部到核心结论之间的所有内容
         lines = markdown_content.split('\n')
         filtered_lines = []
-        skip = False
+        # 跳过开头的空的整体汇总部分
+        skip = True
         for line in lines:
-            if "- 整体汇总对比" in line:
-                skip = True
-                continue
-            if skip and "- 各月份前后两天指标对比" in line:
+            if "- 波动月份前后两日指标对比" in line:
                 skip = False
             if not skip:
                 filtered_lines.append(line)
         
-        # 只保留头部+月度对比前2个月数据+核心结论
+        # 保留头部 + 所有波动月份的对比 + 所有波动月份的客户+业务方下钻 + 核心结论
         push_content = ""
-        for i, line in enumerate(filtered_lines):
-            push_content += line + "\n"
-            # 2026-01和2026-02两个大波动月份展示完就停止
-            if "### 2026-02 月份" in line:
+        # 先添加头部信息
+        header_lines = markdown_content.split('- 波动月份前后两日指标对比')[0]
+        push_content += header_lines
+        push_content += "- 波动月份前后两日指标对比\n"
+        
+        # 添加过滤后的内容直到核心结论
+        for line in filtered_lines:
+            if "## 核心结论" in line:
                 break
+            push_content += line + "\n"
         
         # 添加核心结论
         if "## 核心结论" in markdown_content:
@@ -280,8 +285,11 @@ def send_to_wechat_webhook(webhook_url, markdown_content, report_path):
         
         push_content += "\n\n> 【附件】完整报告路径: {report_path}".format(report_path=report_path)
         
+        # 保证不超过企业微信4000字节限制
+        push_content = push_content[:4000]
+        
         # 推送markdown内容
-        payload = {"msgtype": "markdown", "markdown": {"content": push_content[:4000]}}
+        payload = {"msgtype": "markdown", "markdown": {"content": push_content}}
         response = requests.post(webhook_url, json=payload, headers=headers, timeout=10)
         res_data = response.json()
         if res_data.get("errcode") == 0:
@@ -315,21 +323,24 @@ if __name__ == "__main__":
     yesterday_date = yesterday.date()
     
     if today.day >= 3:
-        # 两个月前到当月（共3个月）
-        end_month = today.strftime("%Y-%m")
-        # 计算两个月前
-        start_datetime = today.replace(day=1) - timedelta(days=2*30)
-        start_month = start_datetime.strftime("%Y-%m")
-    else:
-        # 三个月前到上个月（共3个月）
+        # 当前 >= 3号：上个月截止，往前推12个月
         # 计算上个月
         end_datetime = today.replace(day=1) - timedelta(days=1)
         end_month = end_datetime.strftime("%Y-%m")
-        # 计算三个月前
-        start_datetime = end_datetime.replace(day=1) - timedelta(days=3*30)
+        # 计算11个月前，总共12个月
+        start_datetime = end_datetime.replace(day=1) - timedelta(days=11*30)
+        start_month = start_datetime.strftime("%Y-%m")
+    else:
+        # 当前 < 3号：上上个月截止，往前推12个月
+        # 计算上上个月
+        end_datetime = today.replace(day=1) - timedelta(days=1)  # 上个月第一天
+        end_datetime = end_datetime.replace(day=1) - timedelta(days=1)  # 上上个月最后一天
+        end_month = end_datetime.strftime("%Y-%m")
+        # 计算11个月前，总共12个月
+        start_datetime = end_datetime.replace(day=1) - timedelta(days=11*30)
         start_month = start_datetime.strftime("%Y-%m")
     
-    print("筛选月份范围: %s ~ %s" % (start_month, end_month))
+    print("筛选月份范围: %s ~ %s (共12个月)" % (start_month, end_month))
     print("对比两天: %s (昨日) vs %s (今日)" % (yesterday_date, today_date))
     
     # 查询所有符合月份范围并排除七牛CDN，分别查询两天
@@ -395,6 +406,9 @@ if __name__ == "__main__":
         print("\n正在推送报告到企业微信测试版...")
         send_to_wechat_webhook(WECHAT_WEBHOOK, report, OUTPUT_REPORT_PATH)
 
+    # 计算波动月份
+    big_diff_months = monthly_result[abs(monthly_result["毛利_diff"]) > 30000].copy()
+    
     # 打印核心结论
     print("\n===== 核心结论 =====")
     total_prev_profit = monthly_result["毛利_new_prev"].sum()
@@ -404,9 +418,9 @@ if __name__ == "__main__":
     print(
         "总毛利变化: %+.2f (%+.2f%%)" % (total_profit_diff, total_profit_rate)
     )
-    if len(monthly_result) > 0:
-        month = monthly_result.iloc[0]['月份']
-        diff = monthly_result.iloc[0]['毛利_diff']
-        print(
-            "最大波动月份: %s，毛利变化%+.2f" % (month, diff)
-        )
+    # 打印所有波动超过3万的月份
+    if len(big_diff_months) > 0:
+        print("\n存在毛利波动超过3万的月份:")
+        for _, row in big_diff_months.iterrows():
+            sign = "+" if row["毛利_diff"] > 0 else ""
+            print("  - %s: %s%.2f" % (row["月份"], sign, row["毛利_diff"] / 10000))

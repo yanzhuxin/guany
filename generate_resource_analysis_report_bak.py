@@ -165,8 +165,8 @@ if __name__ == "__main__":
     # 配置参数
     TARGET_DS_ID = "m5ee9ddb4ec7c4fc19fecfac"
     OUTPUT_DIR = "/home/yanzhuxin/guany/reports/"
-    OUTPUT_REPORT_PATH = OUTPUT_DIR + "不含七牛CDN_302资源类型+机房维度波动分析报告.md"
-    OUTPUT_DATA_PATH = OUTPUT_DIR + "不含七牛CDN_302资源类型+机房维度分析数据集.csv"
+    OUTPUT_REPORT_PATH = OUTPUT_DIR + "不含七牛CDN_302资源类型波动分析报告.md"
+    OUTPUT_DATA_PATH = OUTPUT_DIR + "不含七牛CDN_302分析数据集.csv"
     # 企业微信推送配置（开启后推送HTML附件）
     ENABLE_WECHAT_PUSH = True
     WECHAT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=0d04ba7b-40e4-4502-bcce-bcbc60a2bfd4"
@@ -252,12 +252,7 @@ if __name__ == "__main__":
             print("❌ 有效时间点不足2个，无法进行波动分析")
             exit()
 
-    if len(unique_times) != 2:
-        # 使用处理后的每天最后快照
-        keep_times = sorted(keep_times)
-        time_prev, time_latest = keep_times[0], keep_times[1]
-    else:
-        time_prev, time_latest = unique_times[0], unique_times[1]
+    time_prev, time_latest = unique_times[0], unique_times[1]
     print(f"分析时间点：{time_prev} → {time_latest}")
 
     # ========== 2. 分析计算阶段 ==========
@@ -291,13 +286,6 @@ if __name__ == "__main__":
             return "其他"
 
     df["资源分类"] = df.apply(classify_resource, axis=1)
-    
-    # 新增机房+资源组合分类
-    def classify_room_resource(row):
-        room_prefix = "机房" if row["是否机房"] else "非机房"
-        return f"{room_prefix}{row['资源分类']}"
-    
-    df["机房资源分类"] = df.apply(classify_room_resource, axis=1)
 
     # 整体波动分析
     total_prev = df[df["时间"] == time_prev]["毛利"].sum()
@@ -305,26 +293,25 @@ if __name__ == "__main__":
     total_diff = total_latest - total_prev
     total_rate = (total_diff / total_prev * 100) if total_prev != 0 else np.inf
 
-    # 机房+资源类型维度波动分析
+    # 资源类型维度波动分析
     agg_columns = [
         "系数计量金额",
         "整月成本金额",
         "整月成本带宽",
         "系数计量带宽",
     ]
-    room_resource_agg = df.groupby(["时间", "机房资源分类"])[agg_columns].sum().reset_index()
-    room_resource_agg = df.groupby(["时间", "机房资源分类"])[agg_columns].sum().reset_index()
+    resource_agg = df.groupby(["时间", "资源分类"])[agg_columns].sum().reset_index()
 
     # 分开两个时间点的数据
-    room_prev_data = room_resource_agg[room_resource_agg["时间"] == time_prev].set_index("机房资源分类")
-    room_latest_data = room_resource_agg[room_resource_agg["时间"] == time_latest].set_index(
-        "机房资源分类"
+    prev_data = resource_agg[resource_agg["时间"] == time_prev].set_index("资源分类")
+    latest_data = resource_agg[resource_agg["时间"] == time_latest].set_index(
+        "资源分类"
     )
 
     # 合并数据
-    room_resource_result = pd.merge(
-        room_prev_data,
-        room_latest_data,
+    resource_result = pd.merge(
+        prev_data,
+        latest_data,
         left_index=True,
         right_index=True,
         how="outer",
@@ -332,28 +319,14 @@ if __name__ == "__main__":
     ).fillna(0)
 
     # 计算毛利：系数计量金额 - 整月成本金额
-    room_resource_result["毛利_prev"] = room_resource_result["系数计量金额_prev"] - room_resource_result["整月成本金额_prev"]
-    room_resource_result["毛利_latest"] = room_resource_result["系数计量金额_latest"] - room_resource_result["整月成本金额_latest"]
-    
-    # 计算毛利率：毛利 / 系数计量金额
-    room_resource_result["毛利率_prev"] = room_resource_result.apply(
-        lambda x: (x["毛利_prev"] / x["系数计量金额_prev"] * 100) if x["系数计量金额_prev"] != 0 else 0,
-        axis=1,
-    )
-    room_resource_result["毛利率_latest"] = room_resource_result.apply(
-        lambda x: (x["毛利_latest"] / x["系数计量金额_latest"] * 100) if x["系数计量金额_latest"] != 0 else 0,
-        axis=1,
-    )
+    resource_result["毛利_prev"] = resource_result["系数计量金额_prev"] - resource_result["整月成本金额_prev"]
+    resource_result["毛利_latest"] = resource_result["系数计量金额_latest"] - resource_result["整月成本金额_latest"]
 
     # 计算波动
-    room_resource_result["毛利_diff"] = (
-        room_resource_result["毛利_latest"] - room_resource_result["毛利_prev"]
+    resource_result["毛利_diff"] = (
+        resource_result["毛利_latest"] - resource_result["毛利_prev"]
     )
-    # 计算毛利率波动
-    room_resource_result["毛利率_diff"] = (
-        room_resource_result["毛利率_latest"] - room_resource_result["毛利率_prev"]
-    )
-    room_resource_result["毛利_rate"] = room_resource_result.apply(
+    resource_result["毛利_rate"] = resource_result.apply(
         lambda x: (
             (x["毛利_diff"] / x["毛利_prev"] * 100)
             if x["毛利_prev"] != 0
@@ -361,81 +334,26 @@ if __name__ == "__main__":
         ),
         axis=1,
     )
-    room_resource_result["系数计量金额_diff"] = (
-        room_resource_result["系数计量金额_latest"] - room_resource_result["系数计量金额_prev"]
+    resource_result["系数计量金额_diff"] = (
+        resource_result["系数计量金额_latest"] - resource_result["系数计量金额_prev"]
     )
-    room_resource_result["整月成本金额_diff"] = (
-        room_resource_result["整月成本金额_latest"] - room_resource_result["整月成本金额_prev"]
+    resource_result["整月成本金额_diff"] = (
+        resource_result["整月成本金额_latest"] - resource_result["整月成本金额_prev"]
     )
-    room_resource_result["整月成本带宽_diff"] = (
-        room_resource_result["整月成本带宽_latest"] - room_resource_result["整月成本带宽_prev"]
+    resource_result["整月成本带宽_diff"] = (
+        resource_result["整月成本带宽_latest"] - resource_result["整月成本带宽_prev"]
     )
-    room_resource_result["系数计量带宽_diff"] = (
-        room_resource_result["系数计量带宽_latest"] - room_resource_result["系数计量带宽_prev"]
+    resource_result["系数计量带宽_diff"] = (
+        resource_result["系数计量带宽_latest"] - resource_result["系数计量带宽_prev"]
     )
 
     # 按毛利波动绝对值排序
-    room_resource_result = room_resource_result.sort_values("毛利_diff", key=abs, ascending=False)
-
-    # ========== 机房维度波动分析 ==========
-    # 暂不支持机房维度分析，注释掉 - 数据中没有机房ID列
-    # idc_agg = df.groupby(["时间", "机房ID"])[agg_columns].sum().reset_index()
-    # 
-    # # 分开两个时间点的数据
-    # idc_prev_data = idc_agg[idc_agg["时间"] == time_prev].set_index("机房ID")
-    # idc_latest_data = idc_agg[idc_agg["时间"] == time_latest].set_index(
-    #     "机房ID"
-    # )
-    # 
-    # # 合并数据
-    # idc_result = pd.merge(
-    #     idc_prev_data,
-    #     idc_latest_data,
-    #     left_index=True,
-    #     right_index=True,
-    #     how="outer",
-    #     suffixes=("_prev", "_latest"),
-    # ).fillna(0)
-    # 
-    # # 计算毛利：系数计量金额 - 整月成本金额
-    # idc_result["毛利_prev"] = idc_result["系数计量金额_prev"] - idc_result["整月成本金额_prev"]
-    # idc_result["毛利_latest"] = idc_result["系数计量金额_latest"] - idc_result["整月成本金额_latest"]
-    # 
-    # # 计算波动
-    # idc_result["毛利_diff"] = (
-    #     idc_result["毛利_latest"] - idc_result["毛利_prev"]
-    # )
-    # idc_result["毛利_rate"] = idc_result.apply(
-    #     lambda x: (
-    #         (x["毛利_diff"] / x["毛利_prev"] * 100)
-    #         if x["毛利_prev"] != 0
-    #         else (np.inf if x["毛利_diff"] > 0 else -np.inf)
-    #     ),
-    #     axis=1,
-    # )
-    # idc_result["系数计量金额_diff"] = (
-    #     idc_result["系数计量金额_latest"] - idc_result["系数计量金额_prev"]
-    # )
-    # idc_result["整月成本金额_diff"] = (
-    #     idc_result["整月成本金额_latest"] - idc_result["整月成本金额_prev"]
-    # )
-    # idc_result["整月成本带宽_diff"] = (
-    #     idc_result["整月成本带宽_latest"] - idc_result["整月成本带宽_prev"]
-    # )
-    # idc_result["系数计量带宽_diff"] = (
-    #     idc_result["系数计量带宽_latest"] - idc_result["系数计量带宽_prev"]
-    # )
-    # 
-    # # 按毛利波动绝对值排序
-    # idc_result = idc_result.sort_values("毛利_diff", key=abs, ascending=False)
-    # 创建空DataFrame避免报错
-    import pandas as pd
-    idc_result = pd.DataFrame()
+    resource_result = resource_result.sort_values("毛利_diff", key=abs, ascending=False)
 
     # ========== 3. 报告生成阶段 ==========
     print("\n===== 生成分析报告 =====")
 
-    report = f"""# 不含七牛CDN/302资源类型+机房维度波动分析报告
+    report = f"""# 不含七牛CDN/302资源类型波动分析报告
 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 分析周期: {time_prev} → {time_latest}
 筛选规则：月份={filter_month}，时间≥昨日凌晨，签约方不含七牛/302
@@ -458,29 +376,26 @@ flowchart LR
 
 ---
 
- ## 二、整体波动概览
- 总毛利: **{"↑" if total_diff > 0 else "↓"} {total_diff/10000:,.2f}万元** （{total_prev/10000:,.2f}万元 → {total_latest/10000:,.2f}万元）, 环比**{"+" if total_rate > 0 else ""}{total_rate:.2f}%**
- 系数计量金额: {"+" if (room_resource_result["系数计量金额_diff"].sum()) > 0 else ""}{room_resource_result["系数计量金额_diff"].sum()/10000:,.2f}万元
- 整月成本金额: {"+" if (room_resource_result["整月成本金额_diff"].sum()) > 0 else ""}{room_resource_result["整月成本金额_diff"].sum()/10000:,.2f}万元
- 整月成本带宽: {"+" if (room_resource_result["整月成本带宽_diff"].sum()) > 0 else ""}{room_resource_result["整月成本带宽_diff"].sum():,.2f}G
- 系数计量带宽: {"+" if (room_resource_result["系数计量带宽_diff"].sum()) > 0 else ""}{room_resource_result["系数计量带宽_diff"].sum():,.2f}G
+## 二、整体波动概览
+总毛利: **{"↑" if total_diff > 0 else "↓"} {total_diff/10000:,.2f}万元** （{total_prev/10000:,.2f}万元 → {total_latest/10000:,.2f}万元）, 环比**{"+" if total_rate > 0 else ""}{total_rate:.2f}%**
+系数计量金额: {"+" if (resource_result["系数计量金额_diff"].sum()) > 0 else ""}{resource_result["系数计量金额_diff"].sum()/10000:,.2f}万元
+整月成本金额: {"+" if (resource_result["整月成本金额_diff"].sum()) > 0 else ""}{resource_result["整月成本金额_diff"].sum()/10000:,.2f}万元
+整月成本带宽: {"+" if (resource_result["整月成本带宽_diff"].sum()) > 0 else ""}{resource_result["整月成本带宽_diff"].sum():,.2f}G
+系数计量带宽: {"+" if (resource_result["系数计量带宽_diff"].sum()) > 0 else ""}{resource_result["系数计量带宽_diff"].sum():,.2f}G
 
- ---
+---
 
- ## 三、机房+资源类型维度波动明细
- =====================================================================================================================================
- 分类        前值毛利      现值毛利      毛利变化        变化率    前值毛利率  现值毛利率  毛利率变化   金额变化   成本变化    成本带宽    计费带宽
- =====================================================================================================================================
- """
+## 二、资源类型维度波动明细
+========================================================================================
+资源分类    前值毛利      现值毛利      毛利变化        变化率    金额变化   成本变化    成本带宽    计费带宽
+========================================================================================
+"""
 
-    for room_res_type, row in room_resource_result.iterrows():
+    for res_type, row in resource_result.iterrows():
         profit_prev = row["毛利_prev"]
         profit_latest = row["毛利_latest"]
         profit_diff = row["毛利_diff"]
         profit_rate = row["毛利_rate"]
-        margin_prev = row["毛利率_prev"]
-        margin_latest = row["毛利率_latest"]
-        margin_diff = row["毛利率_diff"]
         amount_diff = row["系数计量金额_diff"]
         cost_diff = row["整月成本金额_diff"]
         cost_bw_diff = row["整月成本带宽_diff"]
@@ -488,20 +403,14 @@ flowchart LR
 
         icon = "↑" if profit_diff > 0 else "↓"
         color = "red" if profit_diff > 0 else "green"
-        margin_icon = "↑" if margin_diff > 0 else "↓"
-        margin_color = "red" if margin_diff > 0 else "green"
         # 纯文本对齐，保留颜色格式（企业微信支持font标签）
         profit_diff_str = f"{icon} <font color='{color}'>{'+' if profit_diff > 0 else ''}{profit_diff/10000:.2f}万元</font>"
-        margin_diff_str = f"{margin_icon} <font color='{margin_color}'>{'+' if margin_diff > 0 else ''}{margin_diff:.2f}%</font>"
-        report += "%-10s %-12s %-12s %s %+8.2f %8.2f %8.2f %s %+10s %+10s %+10s %+10s\n" % (
-            room_res_type,
-            f"{profit_prev/10000:.2f}万",
-            f"{profit_latest/10000:.2f}万",
+        report += "%-8s %-12s %-12s %+24s %+8s %+10s %+10s %+10s %+10s\n" % (
+            res_type,
+            f"{profit_prev/10000:.2f}万元",
+            f"{profit_latest/10000:.2f}万元",
             profit_diff_str,
-            profit_rate,
-            margin_prev,
-            margin_latest,
-            margin_diff_str,
+            f"{'+' if profit_rate > 0 else ''}{profit_rate:.2f}%",
             f"{'+' if amount_diff > 0 else ''}{amount_diff/10000:.2f}万",
             f"{'+' if cost_diff > 0 else ''}{cost_diff/10000:.2f}万",
             f"{'+' if cost_bw_diff > 0 else ''}{cost_bw_diff:.2f}G",
@@ -512,7 +421,7 @@ flowchart LR
     # report += "\n---\n\n## 三、签约方波动明细\n"
     # # 先筛选波动>5万的大波动资源
     # big_diff_resources = resource_result[abs(resource_result["毛利_diff"]) > 50000]
-    #
+    
     # if len(big_diff_resources) > 0:
     #     # 有大波动资源，逐个下钻
     #     report += "### 大波动资源签约方影响\n"
@@ -531,8 +440,8 @@ flowchart LR
     #         cust_result["毛利_latest"] = cust_result["系数计量金额_latest"] - cust_result["整月成本金额_latest"]
     #         cust_result["毛利_diff"] = cust_result["毛利_latest"] - cust_result["毛利_prev"]
     #         # 筛选波动>1万的签约方，按波动绝对值排序
-    #         cust_result = cust_result[abs(cust_result["毛利_diff"]) > 10000].sort_values("毛利_diff", key=abs, ascending=False).head(5)
-    #
+    #         cust_result = cust_result[abs(cust_result["毛利_diff"]) > 10000].sort_values("毛利_diff", key=abs, ascending=False)
+            
     #         if len(cust_result) > 0:
     #             report += f"\n#### {res_type}（毛利变化{'+' if profit_diff > 0 else ''}{profit_diff/10000:.2f}万元）\n"
     #             report += "========================================================================================\n"
@@ -547,24 +456,62 @@ flowchart LR
     #                 c_color = "red" if c_profit_diff > 0 else "green"
     #                 c_diff_str = f"{c_icon} <font color='{c_color}'>{'+' if c_profit_diff > 0 else ''}{c_profit_diff/10000:.2f}万元</font>"
     #                 report += "%-20s %-12s %-12s %+24s %+8s\n" % (
-    #                     cust_name[:18],
+    #                     cust_name[:18], 
     #                     f"{c_profit_prev/10000:.2f}万",
     #                     f"{c_profit_latest/10000:.2f}万",
     #                     c_diff_str,
     #                     f"{'+' if c_profit_rate > 0 else ''}{c_profit_rate:.2f}%"
     #                 )
     #             report += "----------------------------------------------------------------------------------------\n"
-    #     report += "--------------------------------------------------------------------------------\n"
-
-
+    # else:
+    #     # 无大波动资源，展示每个资源类型下的签约方波动TOP5
+    #     report += "### 各资源类型签约方波动TOP5\n"
+    #     # 遍历所有资源类型
+    #     for res_type in ["专线", "盒子", "汇聚", "其他"]:
+    #         res_data = df[df["资源分类"] == res_type]
+    #         if len(res_data) == 0:
+    #             continue
+    #         # 按签约方聚合计算波动
+    #         customer_agg = res_data.groupby(["时间", "签约方名称"])[["系数计量金额", "整月成本金额"]].sum().reset_index()
+    #         prev_cust = customer_agg[customer_agg["时间"] == time_prev].set_index("签约方名称")
+    #         latest_cust = customer_agg[customer_agg["时间"] == time_latest].set_index("签约方名称")
+    #         cust_result = pd.merge(prev_cust, latest_cust, left_index=True, right_index=True, how="outer", suffixes=("_prev", "_latest")).fillna(0)
+    #         cust_result["毛利_prev"] = cust_result["系数计量金额_prev"] - cust_result["整月成本金额_prev"]
+    #         cust_result["毛利_latest"] = cust_result["系数计量金额_latest"] - cust_result["整月成本金额_latest"]
+    #         cust_result["毛利_diff"] = cust_result["毛利_latest"] - cust_result["毛利_prev"]
+    #         # 按波动绝对值排序取TOP5
+    #         cust_result = cust_result.sort_values("毛利_diff", key=abs, ascending=False).head(5)
+            
+    #         if len(cust_result) > 0:
+    #             report += f"\n#### {res_type}\n"
+    #             report += "========================================================================================\n"
+    #             report += "%-20s %-12s %-12s %+24s %+8s\n" % ("签约方名称", "前值毛利", "现值毛利", "毛利变化", "变化率")
+    #             report += "========================================================================================\n"
+    #             for cust_name, cust_row in cust_result.iterrows():
+    #                 c_profit_prev = cust_row["毛利_prev"]
+    #                 c_profit_latest = cust_row["毛利_latest"]
+    #                 c_profit_diff = cust_row["毛利_diff"]
+    #                 c_profit_rate = (c_profit_diff / c_profit_prev * 100) if c_profit_prev != 0 else (np.inf if c_profit_diff>0 else -np.inf)
+    #                 c_icon = "↑" if c_profit_diff > 0 else "↓"
+    #                 c_color = "red" if c_profit_diff > 0 else "green"
+    #                 c_diff_str = f"{c_icon} <font color='{c_color}'>{'+' if c_profit_diff > 0 else ''}{c_profit_diff/10000:.2f}万元</font>"
+    #                 report += "%-20s %-12s %-12s %+24s %+8s\n" % (
+    #                     cust_name[:18], 
+    #                     f"{c_profit_prev/10000:.2f}万",
+    #                     f"{c_profit_latest/10000:.2f}万",
+    #                     c_diff_str,
+    #                     f"{'+' if c_profit_rate > 0 else ''}{c_profit_rate:.2f}%"
+    #                 )
+    #             report += "----------------------------------------------------------------------------------------\n"
+    #     report += "----------------------------------------------------------------------------------------\n"
 
     report += f"""
-  ---
+---
 
-  ## 三、核心结论
-  1. 整体毛利环比**{"增长" if total_diff > 0 else "下降"}** {total_diff/10000:,.2f}万元，增幅{total_rate:.2f}%
-  2. 机房+资源维度最大波动：**{room_resource_result.index[0]}**，贡献{"+" if room_resource_result.iloc[0]["毛利_diff"] > 0 else ""}{room_resource_result.iloc[0]["毛利_diff"]/10000:,.2f}万元，毛利率波动{"+" if room_resource_result.iloc[0]["毛利率_diff"] > 0 else ""}{room_resource_result.iloc[0]["毛利率_diff"]:.2f}%
- """
+## 三、核心结论
+1. 整体毛利环比**{"增长" if total_diff > 0 else "下降"}** {total_diff/10000:,.2f}万元，增幅{total_rate:.2f}%
+2. 最大波动来自资源类型：**{resource_result.index[0]}**，贡献{"+" if resource_result.iloc[0]["毛利_diff"] > 0 else ""}{resource_result.iloc[0]["毛利_diff"]/10000:,.2f}万元
+"""
 
     # 保存报告
     with open(OUTPUT_REPORT_PATH, "w", encoding="utf-8") as f:
@@ -622,6 +569,6 @@ flowchart LR
         f"总毛利变化: {'+' if total_diff > 0 else ''}{total_diff/10000:,.2f}万元 ({'+' if total_rate > 0 else ''}{total_rate:.2f}%)"
     )
     print(
-        f"最大波动分类: {room_resource_result.index[0]}，毛利变化{'+' if room_resource_result.iloc[0]['毛利_diff'] > 0 else ''}{room_resource_result.iloc[0]['毛利_diff']/10000:,.2f}万元，毛利率变化{'+' if room_resource_result.iloc[0]['毛利率_diff'] > 0 else ''}{room_resource_result.iloc[0]['毛利率_diff']:.2f}%"
+        f"最大波动资源: {resource_result.index[0]}，毛利变化{'+' if resource_result.iloc[0]['毛利_diff'] > 0 else ''}{resource_result.iloc[0]['毛利_diff']/10000:,.2f}万元"
     )
 
